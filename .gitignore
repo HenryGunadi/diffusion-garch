@@ -1,0 +1,6 @@
+notebooks/eda/experiments.ipynb
+venv/
+__pycache__/
+.ipynb_checkpoints/
+*.pt
+*.pth
