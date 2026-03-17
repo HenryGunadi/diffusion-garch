@@ -4,7 +4,7 @@ import numpy as np
 from typing import List, Literal
 from utils import crop_image
 
-class Conv1DBlock(nn.Module):
+class Res1DBlock(nn.Module):
   def __init__(self, n_conv, in_channels: int, out_channels: int):
     super().__init__()
     
@@ -26,13 +26,20 @@ class Conv1DBlock(nn.Module):
           padding=0
         )
       )
-      layers.append(nn.BatchNorm1d(num_features=out_channels))
+      layers.append(nn.GroupNorm(num_groups=32, num_channels=out_channels))
+      
+      if i != n_conv - 1:
+        break
+
       layers.append(nn.ReLU(inplace=True))
 
     return nn.Sequential(*layers)
   
   def forward(self, x):
+    
     x = self.block(x)
+
+
     return x
 
 class EncoderBlock(nn.Module):
@@ -43,7 +50,7 @@ class EncoderBlock(nn.Module):
     self.max_pool = nn.MaxPool1d(kernel_size=2, stride=2)
     self.conv_blocks = nn.ModuleList(
       [
-        Conv1DBlock(
+        Res1DBlock(
           in_channels=in_channels[i],
           out_channels=out_channels[i],
           n_conv=n_conv
@@ -83,7 +90,7 @@ class DecoderBlock(nn.Module):
     
     self.conv_blocks = nn.ModuleList(
       [
-        Conv1DBlock(
+        Res1DBlock(
           in_channels=in_channels[i],
           out_channels=out_channels[i],
           n_conv=n_conv
@@ -108,7 +115,7 @@ class BottleNeck(nn.Module):
   def __init__(self, in_channels: int, out_channels: int, n_conv):
     super().__init__()
 
-    self.conv_block = Conv1DBlock(
+    self.conv_block = Res1DBlock(
       in_channels=in_channels,
       out_channels=out_channels,
       n_conv=n_conv
