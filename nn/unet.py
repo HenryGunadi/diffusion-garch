@@ -9,6 +9,14 @@ class Res1DBlock(nn.Module):
     super().__init__()
     
     self.block = self.initialize_block(n_conv, in_channels, out_channels)
+    self.conv1 = nn.Conv1d(
+      in_channels=in_channels,
+      out_channels=out_channels,
+      kernel_size=1,
+      stride=1,
+      padding=0
+    )
+    self.relu = nn.ReLU(inplace=True)
     
   def initialize_block(self, n_conv, in_channels, out_channels):
     layers = []
@@ -26,19 +34,23 @@ class Res1DBlock(nn.Module):
           padding=0
         )
       )
+
+      num_groups = min(32, out_channels)
+      while out_channels % num_groups != 0:
+        num_groups -= 1
+
       layers.append(nn.GroupNorm(num_groups=32, num_channels=out_channels))
       
       if i != n_conv - 1:
-        break
-
-      layers.append(nn.ReLU(inplace=True))
+        layers.append(nn.ReLU(inplace=True))
 
     return nn.Sequential(*layers)
   
   def forward(self, x):
-    
-    x = self.block(x)
-
+    x2 = self.block(x)
+    x = self.conv1(x)
+    x = x + x2
+    x = self.relu(x)
 
     return x
 
@@ -64,7 +76,7 @@ class EncoderBlock(nn.Module):
 
     for i in range(self.n_downsampling):
       x = self.conv_blocks[i](x)
-      skipped_con.append(x) # we store every convolution output for the residual connections
+      skipped_con.append(x) # we store every convolution output for the Unet skip connections
       x = self.max_pool(x)
 
     return x, skipped_con

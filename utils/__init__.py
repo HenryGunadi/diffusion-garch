@@ -1,1 +1,1 @@
-from utils.utils import crop_image
+from .utils import crop_image

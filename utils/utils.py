@@ -1,3 +1,6 @@
+from typing import List
+import torch
+
 def crop_image(original, expected):
   """
     (N, C, L) -> dimensions
@@ -14,3 +17,6 @@ def crop_image(original, expected):
   cropped = original[:, :, padding:original_dim-padding]
 
   return cropped
+
+def kl_divergence():
+  pass
