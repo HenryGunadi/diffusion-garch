@@ -16,4 +16,4 @@ class SinusoidalEmbeddings(nn.Module):
 
   def forward(self, x, t):
     embeddings = self.embeddings[t].to(x.device)
-    return embeddings[:, :, None, None]
+    return embeddings[:, None, None] # (N, C, L)

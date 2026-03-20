@@ -1,4 +1,5 @@
 from typing import List
+import torch.nn as nn
 import torch
 
 def crop_image(original, expected):
@@ -18,5 +19,12 @@ def crop_image(original, expected):
 
   return cropped
 
-def kl_divergence():
-  pass
+def normalize(x: torch.Tensor):
+  assert len(x.size()) != 3, "Incorrect dimension size input. Expect (N, C, L) dimension"
+  
+  channels = x.size()[1]
+  num_groups = min(32, channels)
+  while channels % num_groups != 0:
+    num_groups -= 1
+
+  return nn.GroupNorm(num_groups, num_channels=channels)(x)

@@ -2,73 +2,92 @@ import torch
 import torch.nn as nn
 import numpy as np
 from typing import List, Literal
-from utils import crop_image
+from utils import crop_image, normalize
+from .pe import SinusoidalEmbeddings
 
 class Res1DBlock(nn.Module):
-  def __init__(self, n_conv, in_channels: int, out_channels: int):
+  """
+    p = dropout rate
+    T = number of diffusion steps
+  """
+
+  def __init__(self, in_channels: int, out_channels: int, T: int, p=0.5):
     super().__init__()
     
-    self.block = self.initialize_block(n_conv, in_channels, out_channels)
-    self.conv1 = nn.Conv1d(
+    self.conv1d_1 = nn.Conv1d(
       in_channels=in_channels,
       out_channels=out_channels,
       kernel_size=1,
       stride=1,
       padding=0
     )
-    self.relu = nn.ReLU(inplace=True)
+    self.conv1d_2 = nn.Conv1d(
+      in_channels=out_channels,
+      out_channels=out_channels,
+      kernel_size=1,
+      stride=1,
+      padding=0
+    )
+
+    self.time_embed = SinusoidalEmbeddings(time_steps=T, embed_dim=out_channels)
+    self.activation = nn.SiLU(inplace=True)
+    self.dropout = nn.Dropout1d(p=p)
     
-  def initialize_block(self, n_conv, in_channels, out_channels):
-    layers = []
+  def forward(self, x, t):
+    x2 = self.activation(normalize(x))
+    x2 = self.conv1d_1(x2)
+    x2 += self.time_embed(x2, t)
+    
+    x2 = self.activation(normalize(x2))
+    x2 = self.dropout(x2)
+    x2 = self.conv1d_2(x2)
 
-    for i in range(n_conv):
-      """
-        The convolution parameters follow the original U-net architecture
-      """
-      layers.append(
-        nn.Conv1d(
-          in_channels=in_channels if i == 0 else out_channels,
-          out_channels=out_channels,
-          kernel_size=3,
-          stride=1,
-          padding=0
-        )
+    x = self.conv1d_1(x)
+
+    return x + x2
+
+class ResLevel(nn.Module):
+  def __init__(self, res_block: int, in_channels: int, out_channels: int, T: int, p=0.5):
+    super().__init__()
+
+    self.res_blocks = nn.ModuleList(
+      Res1DBlock(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        T=T,
+        p=p
       )
+      for _ in range(res_block)
+    )
 
-      num_groups = min(32, out_channels)
-      while out_channels % num_groups != 0:
-        num_groups -= 1
-
-      layers.append(nn.GroupNorm(num_groups=32, num_channels=out_channels))
-      
-      if i != n_conv - 1:
-        layers.append(nn.ReLU(inplace=True))
-
-    return nn.Sequential(*layers)
-  
-  def forward(self, x):
-    x2 = self.block(x)
-    x = self.conv1(x)
-    x = x + x2
-    x = self.relu(x)
+  def forward(self, x, t):
+    for res_block in self.res_blocks:
+      x = res_block(x, t)
 
     return x
 
 class EncoderBlock(nn.Module):
-  def __init__(self, in_channels: List[int], n_downsampling: int, out_channels: List[int], n_conv=2):
+  def __init__(self, in_channels: List[int], n_downsampling: int, out_channels: List[int], res_block: int, T: int, res_levels: int = 4, p=0.5):
     super().__init__()
 
     self.n_downsampling = n_downsampling
     self.max_pool = nn.MaxPool1d(kernel_size=2, stride=2)
-    self.conv_blocks = nn.ModuleList(
-      [
-        Res1DBlock(
-          in_channels=in_channels[i],
-          out_channels=out_channels[i],
-          n_conv=n_conv
-        ) 
-        for i in range(n_downsampling)
-      ]
+    self.res_block = res_block
+
+    self.res_levels = nn.ModuleList(
+      ResLevel(
+        res_block=res_block,
+        in_channels=in_channels[i],
+        out_channels=out_channels[i],
+        T=T,
+        p=p
+      )
+      for i in range(res_levels)
+    )
+    self.attention = nn.MultiheadAttention(
+      embed_dim=out_channels[len(out_channels) // 2],
+      num_heads=4 if out_channels[len(out_channels) // 2] % 2 == 0 else 3,
+      batch_first=True # (N, C, L) -> (N, L, C) 
     )
 
   def forward(self, x):
@@ -76,8 +95,12 @@ class EncoderBlock(nn.Module):
 
     for i in range(self.n_downsampling):
       x = self.conv_blocks[i](x)
-      skipped_con.append(x) # we store every convolution output for the Unet skip connections
+      skipped_con.append(x)
       x = self.max_pool(x)
+      
+      if i == (self.n_downsampling // 2) - 1:
+        # x = 
+        pass
 
     return x, skipped_con
 
@@ -176,7 +199,7 @@ class Unet1D(nn.Module):
       out_channels=num_classes,
       kernel_size=1
     )
-
+    
   def forward(self, x):
     # encoding process
     x, skipped_con = self.encoder_block(x)
