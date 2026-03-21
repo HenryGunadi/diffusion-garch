@@ -20,7 +20,7 @@ def crop_image(original, expected):
   return cropped
 
 def normalize(x: torch.Tensor):
-  assert len(x.size()) != 3, "Incorrect dimension size input. Expect (N, C, L) dimension"
+  assert len(x.size()) == 3, "Incorrect dimension size input. Expect (N, C, L) dimension"
   
   channels = x.size()[1]
   num_groups = min(32, channels)
