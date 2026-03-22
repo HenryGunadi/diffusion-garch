@@ -1,6 +1,8 @@
 from typing import List
 import torch.nn as nn
 import torch
+import numpy as np
+from numpy.typing import NDArray
 
 def crop_image(original, expected):
   """
@@ -28,3 +30,6 @@ def normalize(x: torch.Tensor):
     num_groups -= 1
 
   return nn.GroupNorm(num_groups, num_channels=channels)(x)
+
+def log_transform(data):
+  return np.log(data[1:] / data[:-1])

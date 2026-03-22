@@ -13,3 +13,4 @@ statsmodels
 arch
 yfinance
 scikit-learn
+tqdm==4.66.4

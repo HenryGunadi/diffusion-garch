@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from typing import List
+from typing import List, Tuple
 
 def forward(x0: torch.Tensor, alpha_hats: torch.Tensor, t: int):
   mean = torch.sqrt(alpha_hats[t]) * x0
@@ -8,6 +8,6 @@ def forward(x0: torch.Tensor, alpha_hats: torch.Tensor, t: int):
 
   return sample_xt(mean, sigma)
 
-def sample_xt(mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+def sample_xt(mu: torch.Tensor, sigma: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
   eps = torch.randn_like(mu)
-  return mu + sigma * eps
+  return mu + sigma * eps, eps

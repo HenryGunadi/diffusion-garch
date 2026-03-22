@@ -17,14 +17,14 @@ class Res1DBlock(nn.Module):
     self.conv1d_1 = nn.Conv1d(
       in_channels=in_channels,
       out_channels=out_channels,
-      kernel_size=1,
+      kernel_size=3,
       stride=1,
       padding=0
     )
     self.conv1d_2 = nn.Conv1d(
       in_channels=out_channels,
       out_channels=out_channels,
-      kernel_size=1,
+      kernel_size=3,
       stride=1,
       padding=0
     )
@@ -187,6 +187,10 @@ class BottleNeck(nn.Module):
 class Unet1D(nn.Module):
   """
     Make sure to provide the correct out_channels & in_channels values
+
+    paramaters:
+    - n_res_block: number of residual blocks
+    - attn_res: resolution level to apply attention mechanism
   """
   def __init__(
       self,
