@@ -14,6 +14,20 @@ class SinusoidalEmbeddings(nn.Module):
 
     self.embeddings = embeddings
 
-  def forward(self, x, t):
+  def forward(self, x: torch.Tensor, t) -> torch.Tensor:
     embeddings = self.embeddings[t].to(x.device)
-    return embeddings[:, None, None] # (N, C, L)
+    return embeddings[:, :, None] # (N, C, L)
+  
+# x = torch.randn(32, 32, 4)
+# b = torch.randn(32, 32, 1)
+# print(torch.cat((x, b), dim=-1).size())
+# x = 10
+# for i in reversed(range(10)):
+#   print(i)
+arr1 = [10, 20]
+arr2 = [40, 30]
+arr = []
+arr.extend(arr1)
+print(arr)
+arr.extend(arr2)
+print(arr)

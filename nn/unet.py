@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from typing import List, Literal
-from utils import crop_image, normalize
+from utils import crop_image, normalize, attn_block
 from .pe import SinusoidalEmbeddings
 
 class Res1DBlock(nn.Module):
@@ -11,28 +11,29 @@ class Res1DBlock(nn.Module):
     T = number of diffusion steps
   """
 
-  def __init__(self, in_channels: int, out_channels: int, T: int, p=0.5):
+  def __init__(self, in_ch: int, out_ch: int, T: int, p=0.5):
     super().__init__()
     
     self.conv1d_1 = nn.Conv1d(
-      in_channels=in_channels,
-      out_channels=out_channels,
+      in_ch=in_ch,
+      out_ch=out_ch,
       kernel_size=3,
       stride=1,
-      padding=0
+      padding=1
     )
     self.conv1d_2 = nn.Conv1d(
-      in_channels=out_channels,
-      out_channels=out_channels,
+      in_ch=out_ch,
+      out_ch=out_ch,
       kernel_size=3,
       stride=1,
-      padding=0
+      padding=1
     )
+    
     self.skip = nn.Identity()
-    if in_channels != out_channels:
-        self.skip = nn.Conv1d(in_channels, out_channels, 1)
+    if in_ch != out_ch:
+        self.skip = nn.Conv1d(in_ch, out_ch, kernel_size=1, padding=0)
 
-    self.time_embed = SinusoidalEmbeddings(time_steps=T, embed_dim=out_channels)
+    self.time_embed = SinusoidalEmbeddings(time_steps=T, embed_dim=out_ch)
     self.activation = nn.SiLU(inplace=True)
     self.dropout = nn.Dropout1d(p=p)
     
@@ -47,40 +48,7 @@ class Res1DBlock(nn.Module):
 
     x = self.skip(x)
 
-    return x + x2 # residual connection
-
-class ResLevel(nn.Module):
-  def __init__(self, n_res_block: int, in_channels: int, out_channels: int, T: int, p=0.5):
-    num_heads = 4
-    assert out_channels % num_heads == 0, "Out_channels must be divisible by 4 (num_heads in MultiheadAttention block)"
-
-    super().__init__()
-
-    self.res_blocks = nn.ModuleList(
-      Res1DBlock(
-        in_channels=in_channels if i == 0 else out_channels,
-        out_channels=out_channels,
-        T=T,
-        p=p
-      )
-      for i in range(n_res_block)
-    )
-    self.attention = nn.MultiheadAttention(
-      embed_dim=out_channels,
-      num_heads=num_heads,
-      batch_first=True # expect (N, L, C) dim size 
-    )
-
-  def forward(self, x: torch.Tensor, t, attention: bool = False):
-    for res_block in self.res_blocks:
-      x = res_block(x, t)
-
-    if attention is True:
-      x = x.permute(0, 2, 1) # (N, C, L) -> (N, L, C)
-      x, _ = self.attention(x, x, x)
-      x = x.permute(0, 2, 1) # (N, L, C) -> (N, C, L)
-      
-    return x
+    return x + x2
 
 class EncoderBlock(nn.Module):
   """
@@ -89,32 +57,30 @@ class EncoderBlock(nn.Module):
     - attn_res: resolution level to apply attention mechanism
   """
 
-  def __init__(self, in_channels: List[int], out_channels: List[int], n_res_block: int, T: int, attn_res: int, p=0.5):
+  def __init__(self, in_ch: List[int], out_ch: List[int], n_res_block: int, T: int, attn_res: int, p=0.5, num_heads: int = 4):
     super().__init__()
     self.attn_res = attn_res
-    self.max_pool = nn.MaxPool1d(kernel_size=2, stride=2)
-    self.res_levels = nn.ModuleList(
-      ResLevel(
-        n_res_block=n_res_block,
-        in_channels=in_channels[i],
-        out_channels=out_channels[i],
-        T=T,
-        p=p
-      )
-      for i in range(len(out_channels))
-    )
-    self.out_channels = out_channels
+    self.down_sammple = nn.Conv1d(stride=2)
+    self.out_chs = out_ch
+    self.in_chs = in_ch
+    self.n_res_block = n_res_block
+    self.num_heads = num_heads
+    self.T = T
+    self.p = p
 
   def forward(self, x: torch.Tensor, t):
     skipped_con = []
 
-    for i, _ in enumerate(self.out_channels):
-      if x.size()[2] == self.attn_res: # applied attention mechanism
-        x = self.res_levels[i](x, t, True)
-      else:
-        x = self.res_levels[i](x, t)
+    for i in range(len(self.out_chs)):
+      for j in range(self.n_res_block):
+        x = Res1DBlock(in_ch=self.in_chs[i] if j == 0 else self.out_chs[i], out_ch=self.out_chs[i], T=self.T, p=self.p)(x, t)
 
-      skipped_con.append(x)
+        # apply attention mechanism between res blocks
+        if x.size()[-1] == self.attn_res and j != self.n_res_block - 1:
+          x = attn_block(out_channels=self.out_chs[i], x=x, num_heads=self.num_heads)
+
+        skipped_con.append(x)
+
       x = self.max_pool(x)
 
     return x, skipped_con
@@ -125,68 +91,74 @@ class DecoderBlock(nn.Module):
     - n_res_block: number of residual blocks
     - attn_res: resolution level to apply attention mechanism
   """
-  def __init__(self, in_channels: List[int], out_channels: List[int], n_res_block: int, T: int, attn_res: int, p=0.5):
+  def __init__(self, in_ch: List[int], out_ch: List[int], n_res_block: int, T: int, attn_res: int, p=0.5, num_heads: int = 4):
     super().__init__()
     self.up_convs = nn.ModuleList( # halves feature maps, increase spatial size
       [
         nn.ConvTranspose1d(
-          in_channels=in_channels[i],
-          out_channels=out_channels[i],
+          in_ch=in_ch[i],
+          out_ch=in_ch[i],
           kernel_size=2,
           stride=2,
           padding=0
         )
-        for i in range(len(out_channels))
+        for i in range(len(out_ch))
       ]
     )
-    self.res_levels = nn.ModuleList(
-      ResLevel(
-        n_res_block=n_res_block,
-        in_channels=in_channels[i],
-        out_channels=out_channels[i],
-        T=T,
-        p=p
-      )
-      for i in range(len(out_channels))
-    )
-    self.out_channels = out_channels
+    self.out_ch = out_ch
     self.attn_res = attn_res
 
-  def forward(self, x, t: int, skips):
-    for i, _ in enumerate(self.out_channels):
+  def forward(self, x, t: int, skips: List):
+    for i, _ in enumerate(self.out_ch):
       x = self.up_convs[i](x)
-      
+
       # u-net skip connections
-      cropped = crop_image(skips[len(self.out_channels) - i - 1], x)
-      x = torch.cat((x, cropped), dim=1)
+      # cropped = crop_image(skips[len(self.out_ch) - i - 1], x)
+      # skip = skips[len(self.out_ch) - i - 1]
+      skip = skips.pop()
+      print("skip u-net : ", skip.size())
+      print("x before concat : ", x.size())
+
+      x = torch.cat((x, skip), dim=1)
+
+      print("x after concat : ", x.size())
 
       if x.size()[2] == self.attn_res:
-        x = self.res_levels[i](x, t, True) # applied attention mechanism
+        x, _ = self.res_levels[i](x, t, True, False) # applied attention mechanism
       else:
-        x = self.res_levels[i](x, t)
+        x, _ = self.res_levels[i](x, t, False, False)
 
     return x
     
 class BottleNeck(nn.Module):
-  def __init__(self, in_channels: int, out_channels: int, n_res_block: int, T: int, p=0.5):
+  def __init__(self, in_ch: int, out_ch: int, n_res_block: int, T: int, p=0.5, num_heads: int = 4):
     super().__init__()
-
-    self.res_level = ResLevel(
-      n_res_block=n_res_block,
-      in_channels=in_channels,
-      out_channels=out_channels,
-      T=T,
-      p=p
+    self.res_blocks = nn.ModuleList(
+      Res1DBlock(
+        in_ch=in_ch,
+        out_ch=out_ch,
+        T=T,
+        p=p
+      )
+      for _ in range(n_res_block)
     )
+    self.out_ch = out_ch
+    self.num_heads = num_heads
 
-  def forward(self, x, t):
-    x = self.res_level(x, t, True)
+  def forward(self, x: torch.Tensor, t: int):
+    for i in range(len(self.res_blocks)):
+      res_block = self.res_blocks[i]
+      x = res_block(x, t)
+
+      # applied attentio mechanism
+      if i != len(self.res_blocks) - 1:
+        x = attn_block(out_ch=self.out_ch, x=x, num_heads=self.num_heads)
 
     return x
   
 class Unet1D(nn.Module):
   """
-    Make sure to provide the correct out_channels & in_channels values
+    Make sure to provide the correct out_ch & in_ch values
 
     paramaters:
     - n_res_block: number of residual blocks
@@ -202,51 +174,59 @@ class Unet1D(nn.Module):
       encoder_in_channels: List[int],
       T:int,
       p=0.5,
-      num_classes: int = 1 # since we're only observing log returns
+      num_classes: int = 1, # since we're only observing log returns
+      num_heads: int = 4
     ):
     super().__init__()
 
     self.encoder_block = EncoderBlock(
       attn_res=attn_res,
-      in_channels=encoder_in_channels,
-      out_channels=encoder_out_channels,
+      in_ch=encoder_in_channels,
+      out_ch=encoder_out_channels,
       n_res_block=n_res_block,
       T=T,
-      p=p
+      p=p,
+      num_heads=num_heads
     )
     self.bottleneck = BottleNeck(
-      in_channels=encoder_out_channels[-1],
-      out_channels=encoder_out_channels[-1],
+      in_ch=encoder_out_channels[-1],
+      out_ch=encoder_out_channels[-1],
       n_res_block=n_res_block,
       T=T,
-      p=p
+      p=p,
+      num_heads=num_heads
     )
     self.decoder_block = DecoderBlock(
       attn_res=attn_res,
-      out_channels=decoder_out_channels,
-      in_channels=decoder_in_channels,
+      out_ch=decoder_out_channels,
+      in_ch=decoder_in_channels,
       n_res_block=n_res_block,
       T=T,
-      p=p
+      p=p,
+      num_heads=num_heads
     )
     self.output_layer = nn.Conv1d(
-      in_channels=decoder_out_channels[-1],
-      out_channels=num_classes,
+      in_ch=decoder_out_channels[-1],
+      out_ch=num_classes,
       kernel_size=1
     )
     
-  def forward(self, x: torch.Tensor, t: int):
-    assert isinstance(t, int), "Argument t must be an int"
+  def forward(self, x: torch.Tensor, t: torch.Tensor):
+    assert isinstance(t, torch.Tensor), "Argument t must be in torch.Tensor type."
 
     # encoding process
     x, skipped_con = self.encoder_block(x, t)
+    print("passed encoder x : ", x.size())
 
     # bottleneck
     x = self.bottleneck(x, t)
+    print("passed bottleneck x : ", x.size())
 
     # decoding process
     x = self.decoder_block(x, t, skipped_con)
+    print("passed decoder")
 
     x = self.output_layer(x)
+    print("passed output layer")
 
     return x

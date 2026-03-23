@@ -10,4 +10,4 @@ def forward(x0: torch.Tensor, alpha_hats: torch.Tensor, t: int):
 
 def sample_xt(mu: torch.Tensor, sigma: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
   eps = torch.randn_like(mu)
-  return mu + sigma * eps, eps
+  return (mu + sigma * eps).to(torch.float32), eps.to(torch.float32)

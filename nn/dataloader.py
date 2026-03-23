@@ -6,7 +6,8 @@ class Returns(Dataset):
     def __init__(self, raw_returns: torch.Tensor, window_size, transform=None):
         super().__init__()
         assert isinstance(raw_returns, torch.Tensor), "raw returns must be in torch.Tensor"
-        
+        raw_returns = raw_returns.to(torch.float32)
+
         self.window_size = window_size
 
         if transform:

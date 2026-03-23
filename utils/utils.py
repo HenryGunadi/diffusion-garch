@@ -33,3 +33,19 @@ def normalize(x: torch.Tensor):
 
 def log_transform(data):
   return np.log(data[1:] / data[:-1])
+
+def attn_block(out_channels: int, x: torch.Tensor, num_heads: int = 4) -> torch.Tensor:
+  assert out_channels % num_heads == 0, f"Out channels must be divisible by number of heads (Multiattention-block), ({out_channels}, {num_heads})"
+
+  attn = nn.MultiheadAttention(
+    embed_dim=out_channels,
+    num_heads=num_heads,
+    batch_first=True # expect (N, L, C) dim size 
+  )
+
+  x = x.permute(0, 2, 1) # (N, C, L) -> (N, L, C)
+  x, _ = attn(x, x, x)
+  print("passed attention")
+  x = x.permute(0, 2, 1) # (N, L, C) -> (N, C, L)
+
+  return x

@@ -15,15 +15,18 @@ def train_step(
   device: str = "cuda"
 ):
   train_loss = 0
-
   model.train()
+
   for X in data:
-    X = X.to(device)
+    X = X.to(device, dtype=torch.float64)
     batch_size = X.size()[0]
 
     t = torch.randint(1, T + 1, size=(batch_size,), device=device)
     xt, epsilon = forward(X, alpha_hats, t)
     epsilon_theta = model(xt, t)
+
+    print("epsilon theta : ", epsilon_theta)
+    print("epsilon size : ", epsilon_theta.size())
     
     loss = loss_fn(epsilon_theta, epsilon)
     train_loss += loss.item()
@@ -46,8 +49,8 @@ def test_step(
   device: str = "cuda"
 ):
   test_loss = 0
-
   model.eval()
+
   with torch.inference_mode():
     for X in data:
       X = X.to(device)
@@ -74,8 +77,8 @@ def train(
   alpha_hats: torch.Tensor,
   model: Unet1D,
   T: int,
-  scheduler: torch.optim.lr_scheduler._LRScheduler,
-  early_stopping: EarlyStopping =None,
+  scheduler: torch.optim.lr_scheduler._LRScheduler=None,
+  early_stopping: EarlyStopping=None,
   device: str = "cuda",
 ):
   results = {
@@ -94,6 +97,8 @@ def train(
       T=T,
       device=device
     )
+
+    print("train passed")
 
     test_loss = test_step(
       data=test_data,
