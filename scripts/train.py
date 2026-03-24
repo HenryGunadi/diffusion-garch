@@ -18,15 +18,25 @@ def train_step(
   model.train()
 
   for X in data:
+    print("start")
     X = X.to(device, dtype=torch.float64)
-    batch_size = X.size()[0]
 
-    t = torch.randint(1, T + 1, size=(batch_size,), device=device)
+    batch_size = X.size()[0]
+    print("X size before : ", X.size())
+    print("batch_size : ", batch_size)
+
+    t = torch.randint(0, T, size=(batch_size,), device=device)
+    print("t : ", t)
+    print("t size : ", t.size())
+
     xt, epsilon = forward(X, alpha_hats, t)
+    print("xt : ", xt)
+    print("epsilon : ", epsilon)
+
     epsilon_theta = model(xt, t)
 
     print("epsilon theta : ", epsilon_theta)
-    print("epsilon size : ", epsilon_theta.size())
+    print("epsilon theta size : ", epsilon_theta.size())
     
     loss = loss_fn(epsilon_theta, epsilon)
     train_loss += loss.item()
@@ -35,8 +45,12 @@ def train_step(
     loss.backward()
 
     optimizer.step()
-
+    print("passed")
+    print("X size : ", X.size())
+  
+  print("data length : ", len(data))
   train_loss = train_loss / len(data)
+  print("passed train step")
 
   return train_loss
 

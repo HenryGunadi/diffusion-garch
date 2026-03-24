@@ -15,15 +15,15 @@ class Res1DBlock(nn.Module):
     super().__init__()
     
     self.conv1d_1 = nn.Conv1d(
-      in_ch=in_ch,
-      out_ch=out_ch,
+      in_channels=in_ch,
+      out_channels=out_ch,
       kernel_size=3,
       stride=1,
       padding=1
     )
     self.conv1d_2 = nn.Conv1d(
-      in_ch=out_ch,
-      out_ch=out_ch,
+      in_channels=out_ch,
+      out_channels=out_ch,
       kernel_size=3,
       stride=1,
       padding=1
@@ -31,7 +31,7 @@ class Res1DBlock(nn.Module):
     
     self.skip = nn.Identity()
     if in_ch != out_ch:
-        self.skip = nn.Conv1d(in_ch, out_ch, kernel_size=1, padding=0)
+        self.skip = nn.Conv1d(in_channels=in_ch, out_channels=out_ch, kernel_size=1, padding=0)
 
     self.time_embed = SinusoidalEmbeddings(time_steps=T, embed_dim=out_ch)
     self.activation = nn.SiLU(inplace=True)
@@ -57,31 +57,50 @@ class EncoderBlock(nn.Module):
     - attn_res: resolution level to apply attention mechanism
   """
 
-  def __init__(self, in_ch: List[int], out_ch: List[int], n_res_block: int, T: int, attn_res: int, p=0.5, num_heads: int = 4):
+  def __init__(self, in_chs: List[int], out_chs: List[int], n_res_block: int, T: int, attn_res: int, p=0.5, num_heads: int = 4):
     super().__init__()
     self.attn_res = attn_res
-    self.down_sammple = nn.Conv1d(stride=2)
-    self.out_chs = out_ch
-    self.in_chs = in_ch
+    self.out_chs = out_chs
     self.n_res_block = n_res_block
     self.num_heads = num_heads
-    self.T = T
-    self.p = p
+
+    self.downsamples = nn.ModuleList([
+      nn.Conv1d(
+          in_channels=self.out_chs[i],
+          out_channels=self.out_chs[i],
+          kernel_size=3,
+          stride=2,
+          padding=1
+      )
+      for i in range(len(self.out_chs))
+    ])
+    self.res_blocks = nn.ModuleDict({
+      f"res_{i}": nn.ModuleList([
+        Res1DBlock(in_ch=in_chs[i] if j == 0 else self.out_chs[i], out_ch=self.out_chs[i], T=T, p=p)
+        for j in range(n_res_block)
+      ])
+      for i in range(len(self.out_chs))
+    })
 
   def forward(self, x: torch.Tensor, t):
-    skipped_con = []
+    skipped_con = {}
 
-    for i in range(len(self.out_chs)):
-      for j in range(self.n_res_block):
-        x = Res1DBlock(in_ch=self.in_chs[i] if j == 0 else self.out_chs[i], out_ch=self.out_chs[i], T=self.T, p=self.p)(x, t)
+    for idx, (key, res_blocks) in enumerate(self.res_blocks.items()):
+      skip_con = []
 
-        # apply attention mechanism between res blocks
-        if x.size()[-1] == self.attn_res and j != self.n_res_block - 1:
-          x = attn_block(out_channels=self.out_chs[i], x=x, num_heads=self.num_heads)
+      print("x before res : ", x.size())
+      for i, res_block in enumerate(res_blocks):
+        x = res_block(x, t)
 
-        skipped_con.append(x)
+        if x.size()[-1] == self.attn_res and i != self.n_res_block - 1:
+          x = attn_block(out_channels=self.out_chs[idx], x=x, num_heads=self.num_heads)
 
-      x = self.max_pool(x)
+        skip_con.append(x)
+
+      skipped_con[key] = skip_con
+      x = self.downsamples[idx](x)
+
+      print("x after res : ", x.size())
 
     return x, skipped_con
 
@@ -91,42 +110,48 @@ class DecoderBlock(nn.Module):
     - n_res_block: number of residual blocks
     - attn_res: resolution level to apply attention mechanism
   """
-  def __init__(self, in_ch: List[int], out_ch: List[int], n_res_block: int, T: int, attn_res: int, p=0.5, num_heads: int = 4):
+  def __init__(self, in_chs: List[int], out_chs: List[int], n_res_block: int, T: int, attn_res: int, p=0.5, num_heads: int = 4):
     super().__init__()
+    self.out_chs = out_chs
     self.up_convs = nn.ModuleList( # halves feature maps, increase spatial size
       [
         nn.ConvTranspose1d(
-          in_ch=in_ch[i],
-          out_ch=in_ch[i],
-          kernel_size=2,
+          in_channels=in_chs[i],
+          out_channels=in_chs[i],
+          kernel_size=4,
           stride=2,
-          padding=0
+          padding=1
         )
-        for i in range(len(out_ch))
+        for i in range(len(out_chs))
       ]
     )
-    self.out_ch = out_ch
+    self.res_blocks = nn.ModuleDict({
+      f"res_{len(self.out_chs) - i - 1}": nn.ModuleList([
+        Res1DBlock(in_ch=in_chs[i] * 2 if j == 0 else (out_chs[i] + in_chs[i]), out_ch=self.out_chs[i], T=T, p=p)
+        for j in range(n_res_block)
+      ])
+      for i in range(len(self.out_chs))
+    })
     self.attn_res = attn_res
+    self.n_res_block = n_res_block
+    self.num_heads = num_heads
 
-  def forward(self, x, t: int, skips: List):
-    for i, _ in enumerate(self.out_ch):
-      x = self.up_convs[i](x)
+  def forward(self, x: torch.Tensor, t: int, skips: nn.ModuleDict):
+    for idx, (key, res_blocks) in enumerate(self.res_blocks.items()):
+      print("x prev : ", x.size())
+      skip_cons = skips[key].copy()
+      x = self.up_convs[idx](x)
+      print("x after uconv : ", x.size())
 
-      # u-net skip connections
-      # cropped = crop_image(skips[len(self.out_ch) - i - 1], x)
-      # skip = skips[len(self.out_ch) - i - 1]
-      skip = skips.pop()
-      print("skip u-net : ", skip.size())
-      print("x before concat : ", x.size())
+      for i, res_block in enumerate(res_blocks):
+        skip = skip_cons.pop()
+        x = torch.cat((x, skip), dim=1)
+        print("x after concat : ", x.size())
 
-      x = torch.cat((x, skip), dim=1)
+        x = res_block(x, t)
 
-      print("x after concat : ", x.size())
-
-      if x.size()[2] == self.attn_res:
-        x, _ = self.res_levels[i](x, t, True, False) # applied attention mechanism
-      else:
-        x, _ = self.res_levels[i](x, t, False, False)
+        if x.size()[-1] == self.attn_res and i != self.n_res_block - 1:
+          x = attn_block(out_channels=self.out_chs[idx], x=x, num_heads=self.num_heads)
 
     return x
     
@@ -152,7 +177,7 @@ class BottleNeck(nn.Module):
 
       # applied attentio mechanism
       if i != len(self.res_blocks) - 1:
-        x = attn_block(out_ch=self.out_ch, x=x, num_heads=self.num_heads)
+        x = attn_block(out_channels=self.out_ch, x=x, num_heads=self.num_heads)
 
     return x
   
@@ -181,8 +206,8 @@ class Unet1D(nn.Module):
 
     self.encoder_block = EncoderBlock(
       attn_res=attn_res,
-      in_ch=encoder_in_channels,
-      out_ch=encoder_out_channels,
+      in_chs=encoder_in_channels,
+      out_chs=encoder_out_channels,
       n_res_block=n_res_block,
       T=T,
       p=p,
@@ -198,16 +223,16 @@ class Unet1D(nn.Module):
     )
     self.decoder_block = DecoderBlock(
       attn_res=attn_res,
-      out_ch=decoder_out_channels,
-      in_ch=decoder_in_channels,
+      out_chs=decoder_out_channels,
+      in_chs=decoder_in_channels,
       n_res_block=n_res_block,
       T=T,
       p=p,
       num_heads=num_heads
     )
     self.output_layer = nn.Conv1d(
-      in_ch=decoder_out_channels[-1],
-      out_ch=num_classes,
+      in_channels=decoder_out_channels[-1],
+      out_channels=num_classes,
       kernel_size=1
     )
     
