@@ -1,1 +1,1 @@
-from scripts.train import train
+from scripts.train import train, evaluate

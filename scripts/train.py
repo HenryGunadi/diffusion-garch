@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from diffusion import forward
 from nn import Unet1D, EarlyStopping
 from tqdm import tqdm
+import time
 
 def train_step(
   data: DataLoader,
@@ -18,26 +19,15 @@ def train_step(
   model.train()
 
   for X in data:
-    print("start")
     X = X.to(device, dtype=torch.float64)
 
     batch_size = X.size()[0]
-    print("X size before : ", X.size())
-    print("batch_size : ", batch_size)
 
     t = torch.randint(0, T, size=(batch_size,), device=device)
-    print("t : ", t)
-    print("t size : ", t.size())
-
     xt, epsilon = forward(X, alpha_hats, t)
-    print("xt : ", xt)
-    print("epsilon : ", epsilon)
 
     epsilon_theta = model(xt, t)
 
-    print("epsilon theta : ", epsilon_theta)
-    print("epsilon theta size : ", epsilon_theta.size())
-    
     loss = loss_fn(epsilon_theta, epsilon)
     train_loss += loss.item()
 
@@ -45,16 +35,12 @@ def train_step(
     loss.backward()
 
     optimizer.step()
-    print("passed")
-    print("X size : ", X.size())
   
-  print("data length : ", len(data))
   train_loss = train_loss / len(data)
-  print("passed train step")
 
   return train_loss
 
-def test_step(
+def evaluate(
   data: DataLoader,
   loss_fn: nn.Module,
   model: Unet1D,
@@ -62,7 +48,7 @@ def test_step(
   T: int,
   device: str = "cuda"
 ):
-  test_loss = 0
+  val_loss = 0
   model.eval()
 
   with torch.inference_mode():
@@ -70,21 +56,21 @@ def test_step(
       X = X.to(device)
       batch_size = X.size()[0]
       
-      t = torch.randint(1, T + 1, size=(batch_size,), device=device)
+      t = torch.randint(0, T, size=(batch_size,), device=device)
       xt, epsilon = forward(X, alpha_hats, t)
 
       epsilon_theta = model(xt, t)
       loss = loss_fn(epsilon_theta, epsilon)
       
-      test_loss += loss.item()
+      val_loss += loss.item()
 
-  test_loss = test_loss / len(data)
+  val_loss = val_loss / len(data)
 
-  return test_loss
+  return val_loss
 
 def train(
   train_data: DataLoader,
-  test_data: DataLoader,
+  val_data: DataLoader,
   optimizer: torch.optim.Optimizer,
   loss_fn: nn.Module,
   epochs: int,
@@ -95,11 +81,16 @@ def train(
   early_stopping: EarlyStopping=None,
   device: str = "cuda",
 ):
+  """
+    If an early stopping module is not provided, save manually after training finishes.
+  """
   results = {
     "train_loss": [],
-    "test_loss": [],
+    "val_loss": [],
+    "training_time": 0
   }
   model = model.to(device)
+  start_time = time.time()
 
   for epoch in tqdm(range(epochs)):
     train_loss = train_step(
@@ -112,10 +103,8 @@ def train(
       device=device
     )
 
-    print("train passed")
-
-    test_loss = test_step(
-      data=test_data,
+    val_loss = evaluate(
+      data=val_data,
       loss_fn=loss_fn,
       model=model,
       alpha_hats=alpha_hats,
@@ -123,26 +112,39 @@ def train(
       device=device
     )
 
-    print(f"Epoch : {epoch} | train_loss : {train_loss} | test_loss : {test_loss}")
+    print(f"Epoch : {epoch} | train_loss : {train_loss:.2f} | val_loss : {val_loss:.2f}")
 
     results["train_loss"].append(train_loss)
-    results["test_loss"].append(test_loss)
+    results["val_loss"].append(val_loss)
 
+    # early stop
     if early_stopping is not None:
-      early_stopping.check_early_stop(test_loss)
+      early_stopping.check_early_stop(val_loss=results["val_loss"], train_loss=results["train_loss"])
 
       if early_stopping.stop_training:
           print(f"Early stopping at epoch : {epoch}")
           break
-
+    
+    # scheduler
     if scheduler is not None:
-        scheduler.step(test_loss)
+        scheduler.step(val_loss)
 
   if early_stopping is not None and not early_stopping.stop_training:
-      print("Training completed. Saving best model...")
-      torch.save({
-          "model_state_dict": early_stopping.best_model_state,
-          "best_loss": early_stopping.best_loss
-      }, early_stopping.save_path)
+    print("Training completed. Saving best model...")
+
+    if early_stopping.save_path.exists():
+      print("Overwriting an existing model...")
+
+    torch.save({
+        "model_state_dict": early_stopping.best_model_state,
+        "best_loss": early_stopping.best_loss,
+        "train_loss": train_loss,
+        "val_loss": val_loss 
+    }, early_stopping.save_path)
+
+  end_time = time.time()
+  total_time = end_time - start_time
+  print(f"Total training time: {total_time} seconds")
+  results["training_time"] = total_time
   
   return results

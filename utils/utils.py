@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch
 import numpy as np
 from numpy.typing import NDArray
+from pathlib import Path
 
 def crop_image(original, expected):
   """
@@ -45,7 +46,12 @@ def attn_block(out_channels: int, x: torch.Tensor, num_heads: int = 4) -> torch.
 
   x = x.permute(0, 2, 1) # (N, C, L) -> (N, L, C)
   x, _ = attn(x, x, x)
-  print("passed attention")
   x = x.permute(0, 2, 1) # (N, L, C) -> (N, C, L)
 
   return x
+
+def is_pth(path: str) -> bool:
+    return Path(path).suffix.lower() == ".pth"
+
+def posterior_beta(alpha_hats: torch.Tensor, betas, t: int):
+  return ((1 - alpha_hats[t-1]) / (1 - alpha_hats[t])) * betas[t]

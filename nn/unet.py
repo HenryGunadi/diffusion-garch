@@ -88,7 +88,6 @@ class EncoderBlock(nn.Module):
     for idx, (key, res_blocks) in enumerate(self.res_blocks.items()):
       skip_con = []
 
-      print("x before res : ", x.size())
       for i, res_block in enumerate(res_blocks):
         x = res_block(x, t)
 
@@ -99,8 +98,6 @@ class EncoderBlock(nn.Module):
 
       skipped_con[key] = skip_con
       x = self.downsamples[idx](x)
-
-      print("x after res : ", x.size())
 
     return x, skipped_con
 
@@ -138,15 +135,12 @@ class DecoderBlock(nn.Module):
 
   def forward(self, x: torch.Tensor, t: int, skips: nn.ModuleDict):
     for idx, (key, res_blocks) in enumerate(self.res_blocks.items()):
-      print("x prev : ", x.size())
       skip_cons = skips[key].copy()
       x = self.up_convs[idx](x)
-      print("x after uconv : ", x.size())
 
       for i, res_block in enumerate(res_blocks):
         skip = skip_cons.pop()
         x = torch.cat((x, skip), dim=1)
-        print("x after concat : ", x.size())
 
         x = res_block(x, t)
 
@@ -241,17 +235,13 @@ class Unet1D(nn.Module):
 
     # encoding process
     x, skipped_con = self.encoder_block(x, t)
-    print("passed encoder x : ", x.size())
 
     # bottleneck
     x = self.bottleneck(x, t)
-    print("passed bottleneck x : ", x.size())
 
     # decoding process
     x = self.decoder_block(x, t, skipped_con)
-    print("passed decoder")
 
     x = self.output_layer(x)
-    print("passed output layer")
 
     return x
