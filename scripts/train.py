@@ -127,7 +127,8 @@ def train(
     
     # scheduler
     if scheduler is not None:
-        scheduler.step(val_loss)
+      scheduler.step(val_loss)
+      print("Current LR: ", scheduler.get_last_lr())
 
   if early_stopping is not None and not early_stopping.stop_training:
     print("Training completed. Saving best model...")

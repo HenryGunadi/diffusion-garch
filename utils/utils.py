@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
+from arch import arch_model
 
 def crop_image(original, expected):
   """
@@ -55,3 +56,38 @@ def is_pth(path: str) -> bool:
 
 def posterior_beta(alpha_hats: torch.Tensor, betas, t: int):
   return ((1 - alpha_hats[t-1]) / (1 - alpha_hats[t])) * betas[t]
+
+def create_dir(path: Path):
+  if not path.exists():
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+def inverse_standard(standard_data, data):
+  mean = data.mean()
+  std = data.std()
+
+  return standard_data * std + mean
+
+def one_step_forecast(train_data, test_data):
+    history = list(train_data)
+    preds = []
+
+    for t in range(len(test_data)):
+        model = arch_model(history, vol='Garch', p=1, q=1)
+        res = model.fit(disp="off")
+
+        forecast = res.forecast(horizon=1)
+        sigma = np.sqrt(forecast.variance.values[-1, 0])
+        preds.append(sigma)
+
+        history.append(test_data[t])
+
+    return preds
+
+if __name__ == "__main__":
+  x = np.arange(1, 10)
+  print(x.shape[0])
+
+  print(x[:-1])
+
+  # for i in range(x.shape[0]):
+  #   print(x[:-(x.shape[0]-i)])
