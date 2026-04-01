@@ -12,14 +12,11 @@ from nn import Unet1D
 from diffusion import reverse
 from utils import log_transform, posterior_beta, inverse_standard, one_step_forecast
 
-# ── App ──────────────────────────────────────────────────────────────────────
 app = FastAPI(title="DiffVol")
 
-# DIR = app/ so index.html is right here, models/ is one level up
 DIR        = Path(__file__).parent
 MODELS_DIR = DIR.parent / "models"
 
-# ── Model config (fixed) ─────────────────────────────────────────────────────
 T           = 1000
 BATCH_SHAPE = (32, 1, 32)
 
@@ -61,7 +58,6 @@ def load_model():
     print("[ok] model loaded")
 
 
-# ── Training data ────────────────────────────────────────────────────────────
 def fetch_training_data() -> np.ndarray:
     raw = yf.Ticker("^GSPC").history(
         start="2016-12-01", end="2026-01-01", interval="1d"
@@ -70,7 +66,6 @@ def fetch_training_data() -> np.ndarray:
     return log_transform(raw[:val_split])
 
 
-# ── Routes ───────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return FileResponse(DIR / "index.html")
@@ -103,10 +98,8 @@ async def run():
     proxy_squared_return = (test_data ** 2).tolist()
     dates                = [str(d) for d in raw_test.index[1:].date]
 
-    # Training data for scaling
     train_log = fetch_training_data()
 
-    # Synthetic generation
     xT = torch.randn(size=BATCH_SHAPE)
     posterior_betas = torch.tensor(
         [posterior_beta(alpha_hats=alpha_hats, betas=betas, t=t) for t in range(T)]
@@ -124,11 +117,9 @@ async def run():
 
     synthetic = inverse_standard(standard_data=synthetic, data=train_log) * 100
 
-    # Forecasts
     diff_preds = one_step_forecast(synthetic, test_data)
     emp_preds  = one_step_forecast(train_log * 100, test_data)
 
-    # Align proxy length
     proxy = proxy_squared_return[1:] if len(diff_preds) != len(proxy_squared_return) else proxy_squared_return
     if len(dates) > len(diff_preds):
         dates = dates[:len(diff_preds)]
