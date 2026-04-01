@@ -68,26 +68,17 @@ def inverse_standard(standard_data, data):
   return standard_data * std + mean
 
 def one_step_forecast(train_data, test_data):
-    history = list(train_data)
-    preds = []
+  history = list(train_data)
+  preds = []
 
-    for t in range(len(test_data)):
-        model = arch_model(history, vol='Garch', p=1, q=1)
-        res = model.fit(disp="off")
+  for t in range(len(test_data)):
+      model = arch_model(history, vol='Garch', p=1, q=1)
+      res = model.fit(disp="off")
 
-        forecast = res.forecast(horizon=1)
-        sigma = np.sqrt(forecast.variance.values[-1, 0])
-        preds.append(sigma)
+      forecast = res.forecast(horizon=1)
+      sigma = np.sqrt(forecast.variance.values[-1, 0])
+      preds.append(sigma)
 
-        history.append(test_data[t])
+      history.append(test_data[t])
 
-    return preds
-
-if __name__ == "__main__":
-  x = np.arange(1, 10)
-  print(x.shape[0])
-
-  print(x[:-1])
-
-  # for i in range(x.shape[0]):
-  #   print(x[:-(x.shape[0]-i)])
+  return preds

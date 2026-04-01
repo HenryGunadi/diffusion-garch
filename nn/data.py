@@ -31,15 +31,3 @@ class Returns(Dataset):
         window = self.data[idx : idx + self.window_size]   # (L,)
         window = window.unsqueeze(0)                       # (1, L)
         return window
-    
-# x = 10
-
-# def test(x):
-#     print("Hello")
-#     x = 12
-
-# test(x)
-# print(x)
-
-data = np.arange(0, 10)
-print(data[:-1])

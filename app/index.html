@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DiffVol // S&amp;P 500 Volatility</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap");
+
+      :root {
+        --bg: #0a0a0a;
+        --surface: #111111;
+        --border: #1f1f1f;
+        --dim: #333333;
+        --muted: #555555;
+        --text: #c8c8c8;
+        --bright: #e8e8e8;
+        --green: #39d353;
+        --amber: #f0a500;
+        --red: #e05252;
+        --blue: #4a9eff;
+        --cyan: #3ec9c9;
+        --purple: #9d79d6;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      /* ── Layout ──────────────────────────────────────── */
+      .shell {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 24px 20px 60px;
+      }
+
+      /* ── Header ──────────────────────────────────────── */
+      header {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 16px;
+        margin-bottom: 24px;
+      }
+      .header-top {
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .logo {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--bright);
+        letter-spacing: -0.5px;
+      }
+      .logo span {
+        color: var(--green);
+      }
+      .tagline {
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .header-meta {
+        margin-top: 8px;
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+      .meta-item {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .meta-item b {
+        color: var(--text);
+        font-weight: 400;
+      }
+
+      /* ── Toolbar ─────────────────────────────────────── */
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+      }
+      .prompt {
+        color: var(--green);
+        font-size: 13px;
+        user-select: none;
+      }
+
+      button {
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--bright);
+        padding: 6px 16px;
+        letter-spacing: 0.5px;
+        transition:
+          border-color 0.15s,
+          color 0.15s,
+          background 0.15s;
+      }
+      button:hover:not(:disabled) {
+        border-color: var(--green);
+        color: var(--green);
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      button.primary {
+        border-color: var(--green);
+        color: var(--green);
+      }
+      button.primary:hover:not(:disabled) {
+        background: var(--green);
+        color: var(--bg);
+      }
+
+      .spinner {
+        display: none;
+        width: 10px;
+        height: 10px;
+        border: 2px solid var(--dim);
+        border-top-color: var(--green);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ── Log / terminal output ───────────────────────── */
+      #log {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        padding: 14px 16px;
+        min-height: 80px;
+        max-height: 180px;
+        overflow-y: auto;
+        margin-bottom: 24px;
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+      #log .ln {
+        display: block;
+        line-height: 1.8;
+      }
+      #log .ln.ok {
+        color: var(--green);
+      }
+      #log .ln.warn {
+        color: var(--amber);
+      }
+      #log .ln.err {
+        color: var(--red);
+      }
+      #log .ln.info {
+        color: var(--cyan);
+      }
+      #log .ln.dim {
+        color: var(--dim);
+      }
+      #log .ts {
+        color: var(--dim);
+        margin-right: 8px;
+      }
+
+      /* ── Stats bar ───────────────────────────────────── */
+      #stats {
+        display: none;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 1px;
+        border: 1px solid var(--border);
+        background: var(--border);
+        margin-bottom: 24px;
+      }
+      .stat-cell {
+        background: var(--surface);
+        padding: 12px 16px;
+      }
+      .stat-label {
+        font-size: 9px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .stat-value {
+        font-size: 16px;
+        font-weight: 500;
+        color: var(--bright);
+      }
+      .stat-value.green {
+        color: var(--green);
+      }
+      .stat-value.amber {
+        color: var(--amber);
+      }
+      .stat-value.blue {
+        color: var(--blue);
+      }
+      .stat-value.cyan {
+        color: var(--cyan);
+      }
+
+      /* ── Chart grid ──────────────────────────────────── */
+      #charts {
+        display: none;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .chart-wrap {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        padding: 16px 16px 8px;
+      }
+      .chart-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .chart-title {
+        font-size: 10px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .legend {
+        display: flex;
+        gap: 16px;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 10px;
+        color: var(--muted);
+      }
+      .legend-dot {
+        width: 8px;
+        height: 2px;
+        display: inline-block;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+      }
+
+      /* ── Footer ──────────────────────────────────────── */
+      footer {
+        margin-top: 40px;
+        border-top: 1px solid var(--border);
+        padding-top: 12px;
+        font-size: 10px;
+        color: var(--dim);
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      /* ── Scrollbar ───────────────────────────────────── */
+      ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: var(--bg);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--dim);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <!-- Header -->
+      <header>
+        <div class="header-top">
+          <div class="logo">Diff<span>Vol</span></div>
+          <div class="tagline">
+            // DDPM-based conditional variance · S&amp;P 500 daily returns
+          </div>
+        </div>
+        <div class="header-meta">
+          <div class="meta-item">TICKER <b>^GSPC</b></div>
+          <div class="meta-item">INTERVAL <b>1D</b></div>
+          <div class="meta-item">
+            TRAIN WINDOW <b>2016-12-01 → 2025-10-01</b>
+          </div>
+          <div class="meta-item">TEST WINDOW <b>2026-01-02 → TODAY</b></div>
+          <div class="meta-item">xT SHAPE <b>(32, 1, 32)</b></div>
+          <div class="meta-item">T <b>1000</b></div>
+        </div>
+      </header>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <span class="prompt">$&gt;</span>
+        <button class="primary" id="btn-run" onclick="runPipeline()">
+          RUN PIPELINE
+        </button>
+        <button onclick="clearLog()">CLEAR LOG</button>
+        <div class="spinner" id="spinner"></div>
+        <span id="elapsed" style="color: var(--muted); font-size: 11px"></span>
+      </div>
+
+      <!-- Log -->
+      <div id="log">
+        <span class="ln dim"
+          ><span class="ts">[init]</span>DiffVol ready. Press RUN PIPELINE to
+          fetch live data and generate synthetic variance.</span
+        >
+      </div>
+
+      <!-- Stats -->
+      <div id="stats">
+        <div class="stat-cell">
+          <div class="stat-label">Test Observations</div>
+          <div class="stat-value blue" id="st-n-test">—</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">Synthetic Length</div>
+          <div class="stat-value cyan" id="st-n-synth">—</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">Diff Var (mean)</div>
+          <div class="stat-value green" id="st-diff-mean">—</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">Emp Var (mean)</div>
+          <div class="stat-value amber" id="st-emp-mean">—</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">Proxy (mean)</div>
+          <div class="stat-value" id="st-proxy-mean">—</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-label">Last Date</div>
+          <div class="stat-value" id="st-last-date" style="font-size: 12px">
+            —
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div id="charts">
+        <!-- Chart 1 -->
+        <div class="chart-wrap">
+          <div class="chart-header">
+            <div class="chart-title">
+              Diffusion Variance vs Squared Returns (proxy)
+            </div>
+            <div class="legend">
+              <div class="legend-item">
+                <span class="legend-dot" style="background: var(--green)"></span
+                >DIFF VAR
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot" style="background: var(--muted)"></span
+                >PROXY
+              </div>
+            </div>
+          </div>
+          <canvas id="c1" height="160"></canvas>
+        </div>
+        <!-- Chart 2 -->
+        <div class="chart-wrap">
+          <div class="chart-header">
+            <div class="chart-title">
+              Empirical Variance vs Squared Returns (proxy)
+            </div>
+            <div class="legend">
+              <div class="legend-item">
+                <span class="legend-dot" style="background: var(--amber)"></span
+                >EMP VAR
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot" style="background: var(--muted)"></span
+                >PROXY
+              </div>
+            </div>
+          </div>
+          <canvas id="c2" height="160"></canvas>
+        </div>
+        <!-- Chart 3 -->
+        <div class="chart-wrap">
+          <div class="chart-header">
+            <div class="chart-title">Diffusion vs Empirical Variance</div>
+            <div class="legend">
+              <div class="legend-item">
+                <span class="legend-dot" style="background: var(--green)"></span
+                >DIFF VAR
+              </div>
+              <div class="legend-item">
+                <span class="legend-dot" style="background: var(--amber)"></span
+                >EMP VAR
+              </div>
+            </div>
+          </div>
+          <canvas id="c3" height="160"></canvas>
+        </div>
+      </div>
+
+      <footer>
+        <span>DiffVol · DDPM Conditional Variance · prototype</span>
+        <span id="footer-ts"></span>
+      </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+      // ── Chart instances ────────────────────────────────────────────────────────
+      const charts = {};
+
+      const FONT = "'JetBrains Mono', monospace";
+      const C = {
+        green: "#39d353",
+        amber: "#f0a500",
+        muted: "#555555",
+        border: "#1f1f1f",
+        dim: "#333333",
+        text: "#c8c8c8",
+        bg: "#111111",
+      };
+
+      Chart.defaults.color = C.text;
+      Chart.defaults.font.family = FONT;
+      Chart.defaults.font.size = 10;
+      Chart.defaults.borderColor = C.border;
+
+      function tickLabels(dates) {
+        // Show every Nth date to avoid crowding
+        const n = Math.max(1, Math.floor(dates.length / 8));
+        return dates.map((d, i) => (i % n === 0 ? d.slice(5) : "")); // MM-DD
+      }
+
+      function makeChart(id, labels, datasets) {
+        const ctx = document.getElementById(id).getContext("2d");
+        if (charts[id]) charts[id].destroy();
+        charts[id] = new Chart(ctx, {
+          type: "line",
+          data: { labels, datasets },
+          options: {
+            animation: { duration: 400 },
+            responsive: true,
+            maintainAspectRatio: true,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: "#111",
+                borderColor: C.border,
+                borderWidth: 1,
+                titleColor: C.text,
+                bodyColor: C.muted,
+                callbacks: {
+                  label: (ctx) =>
+                    ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)}`,
+                },
+              },
+            },
+            scales: {
+              x: {
+                ticks: { maxRotation: 0, font: { size: 9 } },
+                grid: { color: C.border },
+              },
+              y: {
+                ticks: { font: { size: 9 } },
+                grid: { color: C.border },
+              },
+            },
+          },
+        });
+      }
+
+      function ds(label, data, color, fill = false) {
+        return {
+          label,
+          data,
+          borderColor: color,
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.2,
+          fill,
+          backgroundColor: fill ? color + "18" : undefined,
+        };
+      }
+
+      // ── Logging ────────────────────────────────────────────────────────────────
+      function log(msg, cls = "") {
+        const el = document.getElementById("log");
+        const ts = new Date().toTimeString().slice(0, 8);
+        el.innerHTML += `<span class="ln ${cls}"><span class="ts">[${ts}]</span>${msg}</span>`;
+        el.scrollTop = el.scrollHeight;
+      }
+      function clearLog() {
+        document.getElementById("log").innerHTML = "";
+      }
+
+      // ── Stats ──────────────────────────────────────────────────────────────────
+      function mean(arr) {
+        return arr.reduce((a, b) => a + b, 0) / arr.length;
+      }
+
+      function updateStats(data) {
+        document.getElementById("st-n-test").textContent = data.n_test;
+        document.getElementById("st-n-synth").textContent = data.n_synthetic;
+        document.getElementById("st-diff-mean").textContent = mean(
+          data.diff_preds,
+        ).toFixed(4);
+        document.getElementById("st-emp-mean").textContent = mean(
+          data.emp_preds,
+        ).toFixed(4);
+        document.getElementById("st-proxy-mean").textContent = mean(
+          data.proxy,
+        ).toFixed(4);
+        document.getElementById("st-last-date").textContent =
+          data.dates.at(-1) ?? "—";
+        document.getElementById("stats").style.display = "grid";
+      }
+
+      // ── Main pipeline ──────────────────────────────────────────────────────────
+      async function runPipeline() {
+        const btn = document.getElementById("btn-run");
+        const spinner = document.getElementById("spinner");
+        const elapsed = document.getElementById("elapsed");
+
+        btn.disabled = true;
+        spinner.style.display = "inline-block";
+        elapsed.textContent = "";
+
+        log("fetching live ^GSPC data …", "info");
+        log("running DDPM reverse diffusion (T=1000) …", "info");
+
+        const t0 = Date.now();
+
+        try {
+          const res = await fetch("/api/run");
+          const data = await res.json();
+
+          if (!res.ok) {
+            log(`ERROR ${res.status}: ${data.detail ?? "unknown"}`, "err");
+            return;
+          }
+
+          const dt = ((Date.now() - t0) / 1000).toFixed(2);
+          elapsed.textContent = `(${dt}s)`;
+
+          log(`synthetic series length: ${data.n_synthetic}`, "ok");
+          log(
+            `test observations: ${data.n_test} · dates ${data.dates[0]} → ${data.dates.at(-1)}`,
+            "ok",
+          );
+          log(
+            `diff var mean: ${mean(data.diff_preds).toFixed(4)} · emp var mean: ${mean(data.emp_preds).toFixed(4)}`,
+            "ok",
+          );
+          log("rendering charts …", "dim");
+
+          // ── Build charts ─────────────────────────────────────────────────────
+          const labels = data.dates;
+
+          makeChart("c1", labels, [
+            ds("DIFF VAR", data.diff_preds, C.green),
+            ds("PROXY", data.proxy, C.muted),
+          ]);
+          makeChart("c2", labels, [
+            ds("EMP VAR", data.emp_preds, C.amber),
+            ds("PROXY", data.proxy, C.muted),
+          ]);
+          makeChart("c3", labels, [
+            ds("DIFF VAR", data.diff_preds, C.green),
+            ds("EMP VAR", data.emp_preds, C.amber),
+          ]);
+
+          updateStats(data);
+          document.getElementById("charts").style.display = "flex";
+          log("done.", "ok");
+        } catch (err) {
+          log(`fetch failed: ${err.message}`, "err");
+        } finally {
+          btn.disabled = false;
+          spinner.style.display = "none";
+          document.getElementById("footer-ts").textContent =
+            "last run: " + new Date().toLocaleString();
+        }
+      }
+
+      // ── Health check on load ───────────────────────────────────────────────────
+      (async () => {
+        try {
+          const r = await fetch("/api/health");
+          const h = await r.json();
+          if (h.model_loaded) {
+            log("model checkpoint loaded · device: " + h.device, "ok");
+          } else {
+            log("model NOT loaded — place model_v0.pth in ./models/", "warn");
+          }
+        } catch {
+          log("backend unreachable", "err");
+        }
+      })();
+    </script>
+  </body>
+</html>
