@@ -140,7 +140,7 @@ def train(
         "model_state_dict": early_stopping.best_model_state,
         "best_loss": early_stopping.best_loss,
         "train_loss": train_loss,
-        "val_loss": val_loss 
+        "val_loss": val_loss,
     }, early_stopping.save_path)
 
   end_time = time.time()

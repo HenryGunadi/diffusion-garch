@@ -27,7 +27,7 @@ def normalize(x: torch.Tensor):
   assert len(x.size()) == 3, "Incorrect dimension size input. Expect (N, C, L) dimension"
   
   channels = x.size()[1]
-  num_groups = min(32, channels)
+  num_groups = min(64, channels)
   while channels % num_groups != 0:
     num_groups -= 1
 
@@ -52,7 +52,7 @@ def attn_block(out_channels: int, x: torch.Tensor, num_heads: int = 4) -> torch.
   return x
 
 def is_pth(path: str) -> bool:
-    return Path(path).suffix.lower() == ".pth"
+  return Path(path).suffix.lower() == ".pth"
 
 def posterior_beta(alpha_hats: torch.Tensor, betas, t: int):
   return ((1 - alpha_hats[t-1]) / (1 - alpha_hats[t])) * betas[t]
