@@ -80,6 +80,6 @@ def one_step_rolling_forecast(train_data, test_data):
       preds.append(sigma)
 
       history.append(test_data[t])
-      history = history[1:]
+      # history = history[1:]
 
   return preds
