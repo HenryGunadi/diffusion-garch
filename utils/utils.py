@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
 from arch import arch_model
+import scipy.stats as stats
 
 def crop_image(original, expected):
   """
@@ -83,3 +84,27 @@ def one_step_rolling_forecast(train_data, test_data):
       # history = history[1:]
 
   return preds
+
+def compute_aic_log_likelihood(windows):
+  t_wins = 0
+  normal_wins = 0
+  delta_aic_list = []
+
+  for w in windows:
+      mu, sigma = stats.norm.fit(w)
+      logL_normal = np.sum(stats.norm.logpdf(w, mu, sigma))
+      AIC_normal = 2*2 - 2*logL_normal
+
+      df, loc, scale = stats.t.fit(w)
+      logL_t = np.sum(stats.t.logpdf(w, df, loc, scale))
+      AIC_t = 2*3 - 2*logL_t
+
+      delta = AIC_normal - AIC_t
+      delta_aic_list.append(delta)
+
+      if AIC_t < AIC_normal:
+          t_wins += 1
+      else:
+          normal_wins += 1
+
+  return t_wins, normal_wins, delta_aic_list
