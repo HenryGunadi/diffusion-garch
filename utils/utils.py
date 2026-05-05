@@ -24,15 +24,15 @@ def crop_image(original, expected):
 
   return cropped
 
-def normalize(x: torch.Tensor):
-  assert len(x.size()) == 3, "Incorrect dimension size input. Expect (N, C, L) dimension"
+# def normalize(x: torch.Tensor):
+#   assert len(x.size()) == 3, "Incorrect dimension size input. Expect (N, C, L) dimension"
   
-  channels = x.size()[1]
-  num_groups = min(64, channels)
-  while channels % num_groups != 0:
-    num_groups -= 1
+#   channels = x.size()[1]
+#   num_groups = min(64, channels)
+#   while channels % num_groups != 0:
+#     num_groups -= 1
 
-  return nn.GroupNorm(num_groups, num_channels=channels)(x)
+#   return nn.GroupNorm(num_groups, num_channels=channels)(x)
 
 def log_transform(data):
   return np.log(data[1:] / data[:-1])
@@ -69,8 +69,17 @@ def inverse_standard(standard_data, data):
   return standard_data * std + mean
 
 def one_step_rolling_forecast(train_data, test_data):
+  """
+    Returns :
+    1) conditional standard deviations : list[float]
+
+    Description : 
+    1) scaling isnt automatically handled
+    2) expanding windows
+  """
   history = list(train_data)
   preds = []
+  losses = []
 
   for t in range(len(test_data)):
       model = arch_model(history, vol='Garch', p=1, q=1)
@@ -79,11 +88,16 @@ def one_step_rolling_forecast(train_data, test_data):
       forecast = res.forecast(horizon=1)
       sigma = np.sqrt(forecast.variance.values[-1, 0])
       preds.append(sigma)
+      var = sigma ** 2
+
+      # qlike loss
+      loss = (test_data[t] ** 2 / var) + np.log(var)
+      losses.append(loss)
 
       history.append(test_data[t])
       # history = history[1:]
 
-  return preds
+  return preds, losses
 
 def compute_aic_log_likelihood(windows):
   t_wins = 0
@@ -108,3 +122,55 @@ def compute_aic_log_likelihood(windows):
           normal_wins += 1
 
   return t_wins, normal_wins, delta_aic_list
+
+def compute_aic_log_likelihood_stdresid(models):
+    """
+    Compare Normal vs Student-t fit on standardized residuals
+    from GARCH models.
+
+    Returns:
+    - t_wins: how often Student-t wins
+    - normal_wins: how often Normal wins
+    - delta_aic_list: AIC(normal) - AIC(t)
+    """
+
+    t_wins = 0
+    normal_wins = 0
+    delta_aic_list = []
+
+    for res in models:
+
+        z = res.std_resid
+
+        mu, sigma = stats.norm.fit(z)
+        logL_normal = np.sum(stats.norm.logpdf(z, mu, sigma))
+        AIC_normal = 2 * 2 - 2 * logL_normal 
+
+        df, loc, scale = stats.t.fit(z)
+        logL_t = np.sum(stats.t.logpdf(z, df, loc, scale))
+        AIC_t = 2 * 3 - 2 * logL_t 
+
+        delta = AIC_normal - AIC_t
+        delta_aic_list.append(delta)
+
+        if AIC_t < AIC_normal:
+            t_wins += 1
+        else:
+            normal_wins += 1
+
+    return t_wins, normal_wins, delta_aic_list
+
+def split_into_windows(data, window_size):
+  """
+  Non-overlapping windows.
+
+  Returns:
+    np.ndarray of shape (n_windows, window_size)
+  """
+  n = len(data)
+  n_windows = n // window_size 
+
+  trimmed = data[:n_windows * window_size]
+  windows = trimmed.reshape(n_windows, window_size)
+
+  return windows

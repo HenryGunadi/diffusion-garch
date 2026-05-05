@@ -1,20 +1,31 @@
 from arch import arch_model
 import numpy as np
 
-def simulate_garch(omega, alpha, beta, n_data, n_windows, mean="zero", p=1, q=1):
+def simulate_garch_from_windows(windows, mean="zero", p=1, q=1, burn=500):
+  """
+  windows: list/array of shape (n_windows, window_length)
+
+  Returns:
+      sim_data: list of simulated windows (same length as input windows)
+
+  Description:
+  - Fits GARCH(1,1) on each window
+  - Simulates new data using estimated parameters
+  - Includes burn-in to remove initialization bias
+  """
+
   sim_data = []
-  params = np.array([omega, alpha, beta])
 
-  model = arch_model(
-    None,
-    mean=mean,
-    vol="GARCH",
-    p=p,
-    q=q
-  )
+  for window in windows:
+    model = arch_model(window, mean=mean, vol="GARCH", p=p, q=q)
+    res = model.fit(disp="off")
 
-  for _ in range(n_windows):
-    sim = model.simulate(params, nobs=n_data)
-    sim_data.append(sim)
+    params = res.params.values
 
-  return sim_data  
+    sim_model = arch_model(None, mean=mean, vol="GARCH", p=p, q=q)
+    sim = sim_model.simulate(params, nobs=len(window), burn=burn)
+
+    sim_series = sim["data"].values
+    sim_data.append(sim_series)
+
+  return sim_data

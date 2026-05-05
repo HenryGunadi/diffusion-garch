@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 from typing import List, Literal
-from utils import crop_image, normalize, attn_block
+from utils import crop_image, attn_block
 from .pe import SinusoidalEmbeddings
+
 
 class Res1DBlock(nn.Module):
   """
@@ -28,6 +29,9 @@ class Res1DBlock(nn.Module):
       stride=1,
       padding=1
     )
+
+    self.norm1 = nn.GroupNorm(self.get_num_groups(in_ch), in_ch)
+    self.norm2 = nn.GroupNorm(self.get_num_groups(out_ch), out_ch)
     
     self.skip = nn.Identity()
     if in_ch != out_ch:
@@ -36,13 +40,20 @@ class Res1DBlock(nn.Module):
     self.time_embed = SinusoidalEmbeddings(time_steps=T, embed_dim=out_ch)
     self.activation = nn.SiLU(inplace=True)
     self.dropout = nn.Dropout1d(p=p)
+
+  def get_num_groups(self, channels):
+    num_groups = min(64, channels)
+    while channels % num_groups != 0:
+        num_groups -= 1
+    return num_groups
     
   def forward(self, x, t):
-    x2 = self.activation(normalize(x))
+    x2 = self.activation(self.norm1(x))
     x2 = self.conv1d_1(x2)
+
     x2 += self.time_embed(x2, t)
-    
-    x2 = self.activation(normalize(x2))
+
+    x2 = self.activation(self.norm2(x2))
     x2 = self.dropout(x2)
     x2 = self.conv1d_2(x2)
 
