@@ -9,6 +9,7 @@ pandas
 scipy
 matplotlib
 statsmodels
+scikit-learn
 
 arch
 yfinance

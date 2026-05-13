@@ -6,6 +6,11 @@ from numpy.typing import NDArray
 from pathlib import Path
 from arch import arch_model
 import scipy.stats as stats
+from statsmodels.tsa.stattools import acf, pacf, adfuller
+import matplotlib.pyplot as plt
+import yfinance as yf
+import math
+
 
 def crop_image(original, expected):
   """
@@ -68,34 +73,31 @@ def inverse_standard(standard_data, data):
 
   return standard_data * std + mean
 
-def one_step_rolling_forecast(train_data, test_data):
+def one_step_rolling_forecast(train_data, test_data, dist="t"):
   """
-    Returns :
-    1) conditional standard deviations : list[float]
-
-    Description : 
-    1) scaling isnt automatically handled
-    2) expanding windows
+    default-dist: t
   """
   history = list(train_data)
   preds = []
   losses = []
 
   for t in range(len(test_data)):
-      model = arch_model(history, vol='Garch', p=1, q=1)
-      res = model.fit(disp="off")
+    model = arch_model(history, vol='Garch', p=1, q=1, dist=dist)
+    res = model.fit(disp="off")
 
-      forecast = res.forecast(horizon=1)
-      sigma = np.sqrt(forecast.variance.values[-1, 0])
-      preds.append(sigma)
-      var = sigma ** 2
+    forecast = res.forecast(horizon=1)
+    sigma = np.sqrt(forecast.variance.values[-1, 0])
 
-      # qlike loss
-      loss = (test_data[t] ** 2 / var) + np.log(var)
-      losses.append(loss)
+    preds.append(sigma)
 
-      history.append(test_data[t])
-      # history = history[1:]
+    var = sigma ** 2
+
+    # modified qlike loss
+    loss = (test_data[t] ** 2 / var) + np.log(var)
+    losses.append(loss)
+
+    history.append(test_data[t])
+    history = history[1:]
 
   return preds, losses
 
@@ -174,3 +176,109 @@ def split_into_windows(data, window_size):
   windows = trimmed.reshape(n_windows, window_size)
 
   return windows
+
+def test_stationarity(windows, maxlag=10, regression="ct"):
+  result = []
+
+  for window in windows:
+    res = adfuller(window, maxlag=maxlag, regression=regression)
+    result.append(res)
+
+  return result
+
+def plot_distribution(synthetic_data, empirical_window):
+  std = synthetic_data.reshape(-1).std()
+  mu = synthetic_data.reshape(-1).mean()
+
+  data_min = synthetic_data.reshape(-1).min()
+  data_max = synthetic_data.reshape(-1).max()
+
+  data_min_emp = empirical_window.reshape(-1).min()
+  data_max_emp = empirical_window.reshape(-1).max()
+
+  xmin = min(data_min, data_min_emp)
+  xmax = max(data_max, data_max_emp)
+
+  x = np.linspace(xmin, xmax, 1000)
+
+  kde = stats.gaussian_kde(synthetic_data.reshape(-1))
+  kde_emp = stats.gaussian_kde(empirical_window.reshape(-1))
+
+  norm = stats.norm(
+      loc=mu,
+      scale=std,
+  )
+
+  fig, ax = plt.subplots(figsize=(8, 10), nrows=2)
+  fig.suptitle("Comparison of Marginal Return Distributions KDE (Scott) - 128 Window", fontsize=14)
+
+  ax[0].plot(x, kde(x), label="KDE Scott Synthetic")
+  ax[0].plot(x, norm.pdf(x), label="Normal")
+  ax[0].set_title("Normal Distribution")
+  ax[0].legend()
+
+  ax[1].plot(x, kde(x), label="KDE Scott Synthetic")
+  ax[1].plot(x, kde_emp(x), label="KDE Scott Empirical")
+  ax[1].set_title("Emprical vs Synthetic")
+  ax[1].legend()
+
+  plt.tight_layout()
+  plt.show()
+
+def load_and_split_snp500(
+  window = None,
+  start_interval="2010-01-01",
+  end_interval="2026-01-01",
+  interval="1d",
+  ticker="^GSPC",
+  transform_fn=None,
+  cut=0.2,
+):
+  """
+  Loads S&P 500 data, splits into train/val/test, and applies optional transform.
+
+  Returns:
+      train, val, test (and raw split if needed)
+  """
+  raw = yf.Ticker(ticker).history(
+    start=start_interval,
+    end=end_interval,
+    interval=interval
+  )["Close"].to_numpy()
+
+  split = math.ceil(len(raw) * cut)
+  val_split = len(raw) - split * 2
+  test_split = len(raw) - split
+
+  train_raw = raw[:val_split]
+  val_raw = raw[val_split:test_split]
+  test_raw = raw[test_split:]
+
+  if transform_fn is not None:
+    train = transform_fn(train_raw)
+    val = transform_fn(val_raw)
+    test = transform_fn(test_raw)
+  else:
+    train, val, test = train_raw, val_raw, test_raw
+
+  return {
+    "train": train,
+    "val": val,
+    "test": test,
+    "train_raw": train_raw,
+    "val_raw": val_raw,
+    "test_raw": test_raw,
+    "window": window
+  }
+
+def compute_var(sigma_paths, capital = 1000):
+  rt_paths = []
+
+  for sigma_path in sigma_paths:
+    rt = np.zeros(len(sigma_path))
+
+    for sigma in sigma_path:
+      sigma2 = sigma ** 2
+      z = stats.t.rvs(loc=0, scale=1)
+      
+
