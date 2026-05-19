@@ -10,6 +10,8 @@ from statsmodels.tsa.stattools import acf, pacf, adfuller
 import matplotlib.pyplot as plt
 import yfinance as yf
 import math
+from scipy.stats import wasserstein_distance
+
 
 
 def crop_image(original, expected):
@@ -80,6 +82,7 @@ def one_step_rolling_forecast(train_data, test_data, dist="t"):
   history = list(train_data)
   preds = []
   losses = []
+  nus = []
 
   for t in range(len(test_data)):
     model = arch_model(history, vol='Garch', p=1, q=1, dist=dist)
@@ -96,10 +99,13 @@ def one_step_rolling_forecast(train_data, test_data, dist="t"):
     loss = (test_data[t] ** 2 / var) + np.log(var)
     losses.append(loss)
 
+    if dist == "t":
+      nus.append(res.params["nu"])
+
     history.append(test_data[t])
     history = history[1:]
 
-  return preds, losses
+  return preds, losses, nus
 
 def compute_aic_log_likelihood(windows):
   t_wins = 0
@@ -271,14 +277,82 @@ def load_and_split_snp500(
     "window": window
   }
 
-def compute_var(sigma_paths, capital = 1000):
+def compute_returns(sigma_paths, nus_paths, sim = 1000):
   rt_paths = []
 
-  for sigma_path in sigma_paths:
-    rt = np.zeros(len(sigma_path))
-
-    for sigma in sigma_path:
+  for i, sigma_path in enumerate(sigma_paths):
+    rts = np.zeros(len(sigma_path))
+    
+    for j, sigma in enumerate(sigma_path):
       sigma2 = sigma ** 2
-      z = stats.t.rvs(loc=0, scale=1)
-      
+      nus = nus_paths[i][j]
+      z = stats.t.rvs(df=nus, loc=0, scale=1)
+      rt = np.sqrt(sigma2) * z
+      rts[j] = rt
 
+    rt_paths.append(rts)
+
+  return rt_paths
+
+def compute_vars(return_paths, capital = 1000) -> float:
+  vars = []
+
+  for return_path in return_paths:
+    if not isinstance(return_path, np.ndarray):
+      return_path = np.array(return_path)
+
+    sim_dollar_loss = return_path * capital
+    var = -np.percentile(sim_dollar_loss, 1) # 1 percentile
+    vars.append(var)
+
+  return np.array(vars)
+
+def compute_vars_emp(sigma_path, nus_path, capital, ):
+  rts = np.zeros(len(sigma_path))
+
+  for j, sigma in enumerate(sigma_path):
+    sigma2 = sigma ** 2
+    nus = nus_path[j]
+    z = stats.t.rvs(df=nus, loc=0, scale=1)
+    rt = np.sqrt(sigma2) * z
+    rts[j] = rt
+
+  rts = np.array(rts)
+  sim_dollar_loss = rts * capital
+  vars = -np.percentile(sim_dollar_loss, 1) # 1 percentile
+  return np.array(vars)
+
+def coverage_check(emp_log_returns, vars, capital = 1000):
+  simple_returns = np.exp(emp_log_returns) - 1
+  pnl_path = -capital * simple_returns
+  violations = []
+
+def compute_var_t(sigma_path, nu_path, alpha=0.05, capital=1000):
+  var_t = []
+
+  for sigma, nu in zip(sigma_path, nu_path):
+    q = stats.t.ppf(alpha, df=nu) 
+    var = -capital * sigma * q     
+    var_t.append(var)
+
+  return np.array(var_t)
+
+def compute_wasserstein_time_series(vars_syn, vars_mc, vars_emp):
+  W_ddpm_list = []
+  W_mc_list = []
+
+  T = len(vars_emp)
+
+  for t in range(T):
+      ddpm_t = vars_syn[:, t]
+      mc_t   = vars_mc[:, t]
+
+      emp_t = vars_emp[t]
+
+      W_ddpm = wasserstein_distance(ddpm_t, np.full_like(ddpm_t, emp_t))
+      W_mc   = wasserstein_distance(mc_t, np.full_like(mc_t, emp_t))
+
+      W_ddpm_list.append(W_ddpm)
+      W_mc_list.append(W_mc)
+
+  return np.array(W_ddpm_list), np.array(W_mc_list)
